@@ -832,7 +832,7 @@ canvas.addEventListener('pointermove', (e) => {
   if (!isScrubbing) return;
   const dx = e.clientX - scrubStartX;
   const pxPerBeat = Math.max(28, Math.min(56, stageWrap.clientWidth / 8));
-  const nextBeat = Math.max(0, Math.min(TOTAL_BEATS - 0.01, scrubStartBeat - dx / pxPerBeat));
+  const nextBeat = Math.max(0, Math.min(TOTAL_BEATS - 0.01, scrubStartBeat + dx / pxPerBeat));
   currentBeat = nextBeat;
   playedEvents.clear();
   waitedIdx = -1;
@@ -856,7 +856,7 @@ canvas.addEventListener('pointercancel', endScrub);
 canvas.addEventListener('wheel', (e) => {
   if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && Math.abs(e.deltaX) > 1) {
     e.preventDefault();
-    currentBeat = Math.max(0, Math.min(TOTAL_BEATS - 0.01, currentBeat + e.deltaX / 45));
+    currentBeat = Math.max(0, Math.min(TOTAL_BEATS - 0.01, currentBeat - e.deltaX / 45));
     playedEvents.clear();
     waitedIdx = -1;
     document.getElementById('waitBanner').style.display = 'none';
