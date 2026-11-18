@@ -201,6 +201,7 @@
       <button id="btnLabels" class="active">한글 계이름</button>
       <button id="btnHands" class="active">🖐️ 모의 손모양</button>
       <button id="btnEasy" class="active">🌱 쉬운 악보</button>
+      <button id="btnVocal" class="active">🎤 가사 박자</button>
       <button id="btnMetro">🥁 메트로놈</button>
       <button id="btnSound" class="active">🔊 피아노음</button>
     </div>
@@ -301,6 +302,7 @@ let speed = 1.0;
 let zoomRange = false; // false = full 88 keys (21..108), true = focused (36..84)
 let showKorean = true;
 let showHands = true;
+let showVocalCue = true;
 let metroOn = false;
 let soundOn = true;
 
@@ -663,6 +665,10 @@ function drawStage() {
     drawHandsOverlay(W, H, scrollX);
   }
 
+  if (showVocalCue && !(isScrubbing && scrubMoved)) {
+    drawVocalCueOverlay(W, H);
+  }
+
   if (isScrubbing && scrubMoved) {
     const cur = getCurrentEvent();
     const label = cur ? `◀  ${cur.m}마디 (${cur.sec}) · ${cur.chord}  ▶` : '◀  타임라인 이동 중  ▶';
@@ -683,6 +689,72 @@ function drawStage() {
     ctx.fillText(label, W / 2, by + 16);
     ctx.restore();
   }
+}
+
+function drawVocalCueOverlay(W, H) {
+  const cur = getCurrentEvent();
+  const isVocal = (ev) => ev && ev.lyric && !ev.lyric.trim().startsWith('(');
+  const beatInBar = currentBeat < 2 ? Math.floor(currentBeat) + 1 : (Math.floor(currentBeat - 2) % 4) + 1;
+
+  // Find upcoming vocal entry within 4 beats
+  const nextVocal = TIMELINE.find(ev => ev.startBeat > currentBeat && ev.startBeat - currentBeat <= 4.0 && isVocal(ev) && (!cur || !isVocal(cur) || ev.sec !== cur.sec));
+  let cueText = '';
+  let cueColor = 'rgba(56, 189, 248, 0.85)';
+  let cueBg = 'rgba(15, 23, 42, 0.86)';
+
+  if (currentBeat < 2) {
+    const left = Math.ceil(2 - currentBeat);
+    cueText = `⏳ ${left}박 뒤 시작`;
+    cueColor = 'rgba(251, 191, 36, 0.9)';
+  } else if (nextVocal) {
+    const left = Math.ceil(nextVocal.startBeat - currentBeat);
+    const shortLyric = nextVocal.lyric.length > 18 ? nextVocal.lyric.slice(0, 18) + '…' : nextVocal.lyric;
+    cueText = `🎤 ${left}박 뒤 노래: "${shortLyric}"`;
+    cueColor = 'rgba(251, 191, 36, 0.95)';
+  } else if (cur && isVocal(cur)) {
+    const shortLyric = cur.lyric.length > 22 ? cur.lyric.slice(0, 22) + '…' : cur.lyric;
+    const justStarted = (currentBeat - cur.startBeat) < 1.0 && (!TIMELINE[cur.idx - 1] || !isVocal(TIMELINE[cur.idx - 1]) || TIMELINE[cur.idx - 1].sec !== cur.sec);
+    cueText = justStarted ? `🎤 지금 들어가세요! "${shortLyric}"` : `🎤 ${shortLyric}`;
+    cueColor = justStarted ? 'rgba(52, 211, 153, 0.95)' : 'rgba(56, 189, 248, 0.75)';
+  } else if (cur) {
+    cueText = `🎹 반주 구간 (${cur.sec})`;
+  }
+
+  ctx.save();
+  // 4-beat pulse dots + cue pill at top center
+  ctx.font = 'bold 12px sans-serif';
+  const textW = cueText ? ctx.measureText(cueText).width : 0;
+  const dotsW = 76;
+  const padX = 16;
+  const pillW = Math.min(W - 24, dotsW + (cueText ? textW + 16 : 0) + padX * 2);
+  const bx = (W - pillW) / 2;
+  const by = 12;
+
+  ctx.fillStyle = cueBg;
+  ctx.strokeStyle = cueColor;
+  ctx.lineWidth = 1.4;
+  roundRect(ctx, bx, by, pillW, 30, 15);
+  ctx.fill();
+  ctx.stroke();
+
+  // Draw 4 beat dots on the left of the pill
+  for (let i = 1; i <= 4; i++) {
+    const dx = bx + padX + (i - 1) * 18 + 5;
+    const dy = by + 15;
+    const active = currentBeat >= 2 ? (i === beatInBar) : (i <= beatInBar);
+    ctx.beginPath();
+    ctx.arc(dx, dy, active ? 5.5 : 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = active ? (i === 1 ? '#fbbf24' : '#38bdf8') : 'rgba(148, 163, 184, 0.35)';
+    ctx.fill();
+  }
+
+  if (cueText) {
+    ctx.fillStyle = '#f8fafc';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(cueText, bx + padX + dotsW + 6, by + 15);
+  }
+  ctx.restore();
 }
 
 function assignFingers(notes, hand) {
@@ -935,6 +1007,10 @@ document.getElementById('btnEasy').onclick = (e) => {
   waitedIdx = -1;
   document.getElementById('waitBanner').style.display = 'none';
   updateHUD();
+};
+document.getElementById('btnVocal').onclick = (e) => {
+  showVocalCue = !showVocalCue;
+  e.target.classList.toggle('active', showVocalCue);
 };
 document.getElementById('btnMetro').onclick = (e) => {
   metroOn = !metroOn;
