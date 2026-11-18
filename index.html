@@ -199,6 +199,7 @@
 
       <button id="btnZoom">🔍 연주구간 확대</button>
       <button id="btnLabels" class="active">한글 계이름</button>
+      <button id="btnHands" class="active">🖐️ 모의 손모양</button>
       <button id="btnMetro">🥁 메트로놈</button>
       <button id="btnSound" class="active">🔊 피아노음</button>
     </div>
@@ -290,6 +291,7 @@ let activeSection = '전주';
 let speed = 1.0;
 let zoomRange = false; // false = full 88 keys (21..108), true = focused (36..84)
 let showKorean = true;
+let showHands = true;
 let metroOn = false;
 let soundOn = true;
 
@@ -648,6 +650,10 @@ function drawStage() {
     drawNoteGroup(ev.rh, '#34d399', 'rgba(52,211,153,0.6)');
   });
 
+  if (showHands) {
+    drawHandsOverlay(W, H, scrollX);
+  }
+
   if (isScrubbing) {
     const cur = getCurrentEvent();
     const label = cur ? `◀  ${cur.m}마디 (${cur.sec}) · ${cur.chord}  ▶` : '◀  타임라인 이동 중  ▶';
@@ -668,6 +674,123 @@ function drawStage() {
     ctx.fillText(label, W / 2, by + 16);
     ctx.restore();
   }
+}
+
+function assignFingers(notes, hand) {
+  const s = [...notes].sort((a, b) => a - b);
+  const map = {};
+  if (s.length === 0) return map;
+  if (hand === 'lh') {
+    if (s.length === 1) map[5] = s[0];
+    else if (s.length === 2) { map[5] = s[0]; map[s[1] - s[0] >= 7 ? 1 : 2] = s[1]; }
+    else if (s.length === 3) { map[5] = s[0]; map[3] = s[1]; map[1] = s[2]; }
+    else { map[5] = s[0]; map[3] = s[1]; map[2] = s[2]; map[1] = s[3]; }
+  } else {
+    if (s.length === 1) map[3] = s[0];
+    else if (s.length === 2) { map[1] = s[0]; map[s[1] - s[0] >= 7 ? 5 : (s[1] - s[0] >= 4 ? 3 : 2)] = s[1]; }
+    else if (s.length === 3) { map[1] = s[0]; map[s[2] - s[0] >= 9 ? 2 : 3] = s[1]; map[5] = s[2]; }
+    else { map[1] = s[0]; map[2] = s[1]; map[3] = s[2]; map[5] = s[3]; }
+  }
+  return map;
+}
+
+function drawSingleHand(H, scrollX, notes, hand) {
+  if (!notes || notes.length === 0) return;
+  const fMap = assignFingers(notes, hand);
+  // Finger order left-to-right on keyboard:
+  // LH: 5, 4, 3, 2, 1  |  RH: 1, 2, 3, 4, 5
+  const order = hand === 'lh' ? [5, 4, 3, 2, 1] : [1, 2, 3, 4, 5];
+  const color = hand === 'lh' ? '#38bdf8' : '#34d399';
+  const fillBg = hand === 'lh' ? 'rgba(56, 189, 248, 0.24)' : 'rgba(52, 211, 153, 0.24)';
+  const strokeCol = hand === 'lh' ? 'rgba(56, 189, 248, 0.85)' : 'rgba(52, 211, 153, 0.85)';
+
+  // Find pressed x positions
+  const pressedX = {};
+  let sumX = 0, cnt = 0;
+  order.forEach(f => {
+    const m = fMap[f];
+    if (m !== undefined && keyLayout[m]) {
+      const x = keyLayout[m].x - scrollX + keyLayout[m].w / 2;
+      pressedX[f] = x;
+      sumX += x; cnt++;
+    }
+  });
+  if (cnt === 0) return;
+
+  // Estimate x for unpressed fingers smoothly
+  const centerX = sumX / cnt;
+  const fingerTip = {};
+  const baseSpread = 16;
+  const avgIdx = order.reduce((acc, f, idx) => pressedX[f] !== undefined ? acc + idx : acc, 0) / cnt;
+  order.forEach((f, idx) => {
+    const isPressed = pressedX[f] !== undefined;
+    const x = isPressed ? pressedX[f] : centerX + (idx - avgIdx) * baseSpread;
+    // Thumb slightly higher when resting
+    const restY = f === 1 ? H - 36 : H - 28;
+    const y = isPressed ? H - 12 : restY;
+    fingerTip[f] = { x, y, isPressed };
+  });
+
+  const xs = order.map(f => fingerTip[f].x);
+  const palmCenterX = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const palmW = Math.max(46, Math.max(...xs) - Math.min(...xs) + 14);
+  const palmY = H - 72;
+  const palmH = 30;
+
+  ctx.save();
+  // Palm silhouette
+  ctx.fillStyle = fillBg;
+  ctx.strokeStyle = strokeCol;
+  ctx.lineWidth = 1.6;
+  roundRect(ctx, palmCenterX - palmW / 2, palmY, palmW, palmH, 12);
+  ctx.fill();
+  ctx.stroke();
+
+  // Hand label inside palm
+  ctx.fillStyle = '#f8fafc';
+  ctx.font = 'bold 10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(hand === 'lh' ? '왼손' : '오른손', palmCenterX, palmY + palmH / 2);
+
+  // Fingers from palm knuckles to tips
+  order.forEach((f, idx) => {
+    const tip = fingerTip[f];
+    const knuckleX = palmCenterX - palmW * 0.36 + (idx / 4) * (palmW * 0.72);
+    const knuckleY = palmY + palmH - 3;
+
+    ctx.beginPath();
+    ctx.moveTo(knuckleX, knuckleY);
+    ctx.lineTo(tip.x, tip.y);
+    ctx.strokeStyle = tip.isPressed ? color : 'rgba(226, 232, 240, 0.35)';
+    ctx.lineWidth = tip.isPressed ? 7 : 5;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // Fingertip circle with finger number
+    const r = tip.isPressed ? 9 : 6;
+    ctx.beginPath();
+    ctx.arc(tip.x, tip.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = tip.isPressed ? color : 'rgba(30, 41, 59, 0.85)';
+    ctx.fill();
+    ctx.strokeStyle = tip.isPressed ? '#ffffff' : 'rgba(148, 163, 184, 0.45)';
+    ctx.lineWidth = tip.isPressed ? 1.8 : 1;
+    ctx.stroke();
+
+    ctx.fillStyle = tip.isPressed ? '#06121e' : '#94a3b8';
+    ctx.font = tip.isPressed ? 'bold 10px sans-serif' : '9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(f), tip.x, tip.y + 0.5);
+  });
+  ctx.restore();
+}
+
+function drawHandsOverlay(W, H, scrollX) {
+  const cur = getCurrentEvent() || TIMELINE[0];
+  if (!cur) return;
+  drawSingleHand(H, scrollX, cur.lh, 'lh');
+  drawSingleHand(H, scrollX, cur.rh, 'rh');
 }
 
 function roundRect(c, x, y, w, h, r) {
@@ -787,6 +910,10 @@ document.getElementById('btnLabels').onclick = (e) => {
   e.target.textContent = showKorean ? '한글 계이름' : '영문 음이름';
   buildKeyboard();
   updateHUD();
+};
+document.getElementById('btnHands').onclick = (e) => {
+  showHands = !showHands;
+  e.target.classList.toggle('active', showHands);
 };
 document.getElementById('btnMetro').onclick = (e) => {
   metroOn = !metroOn;
