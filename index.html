@@ -647,6 +647,27 @@ function drawStage() {
     drawNoteGroup(ev.lh, '#38bdf8', 'rgba(56,189,248,0.6)');
     drawNoteGroup(ev.rh, '#34d399', 'rgba(52,211,153,0.6)');
   });
+
+  if (isScrubbing) {
+    const cur = getCurrentEvent();
+    const label = cur ? `◀  ${cur.m}마디 (${cur.sec}) · ${cur.chord}  ▶` : '◀  타임라인 이동 중  ▶';
+    ctx.save();
+    ctx.font = 'bold 13px sans-serif';
+    const tw = Math.min(W - 32, ctx.measureText(label).width + 28);
+    const bx = (W - tw) / 2;
+    const by = 18;
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.7)';
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, bx, by, tw, 32, 16);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#e0f2fe';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, W / 2, by + 16);
+    ctx.restore();
+  }
 }
 
 function roundRect(c, x, y, w, h, r) {
@@ -782,6 +803,66 @@ document.getElementById('seekBar').oninput = (e) => {
   waitedIdx = -1;
   updateHUD();
 };
+
+// Stage Horizontal Slide-to-Scrub Timeline (touch + mouse + trackpad)
+let isScrubbing = false;
+let scrubStartX = 0;
+let scrubStartBeat = 0;
+let scrubWasPlaying = false;
+let scrubLabelTimer = null;
+
+canvas.style.touchAction = 'none';
+canvas.style.cursor = 'grab';
+
+canvas.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 && e.pointerType === 'mouse') return;
+  isScrubbing = true;
+  scrubStartX = e.clientX;
+  scrubStartBeat = currentBeat;
+  scrubWasPlaying = isPlaying;
+  if (isPlaying) {
+    isPlaying = false;
+    updatePlayBtn();
+  }
+  canvas.style.cursor = 'grabbing';
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  if (!isScrubbing) return;
+  const dx = e.clientX - scrubStartX;
+  const pxPerBeat = Math.max(28, Math.min(56, stageWrap.clientWidth / 8));
+  const nextBeat = Math.max(0, Math.min(TOTAL_BEATS - 0.01, scrubStartBeat - dx / pxPerBeat));
+  currentBeat = nextBeat;
+  playedEvents.clear();
+  waitedIdx = -1;
+  document.getElementById('waitBanner').style.display = 'none';
+  updateHUD();
+});
+
+function endScrub(e) {
+  if (!isScrubbing) return;
+  isScrubbing = false;
+  canvas.style.cursor = 'grab';
+  try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+  if (scrubWasPlaying) {
+    isPlaying = true;
+    updatePlayBtn();
+  }
+}
+canvas.addEventListener('pointerup', endScrub);
+canvas.addEventListener('pointercancel', endScrub);
+
+canvas.addEventListener('wheel', (e) => {
+  if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && Math.abs(e.deltaX) > 1) {
+    e.preventDefault();
+    currentBeat = Math.max(0, Math.min(TOTAL_BEATS - 0.01, currentBeat + e.deltaX / 45));
+    playedEvents.clear();
+    waitedIdx = -1;
+    document.getElementById('waitBanner').style.display = 'none';
+    updateHUD();
+  }
+}, { passive: false });
 
 // Spacebar play/pause
 window.addEventListener('keydown', (e) => {
