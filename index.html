@@ -663,7 +663,7 @@ function drawStage() {
     drawHandsOverlay(W, H, scrollX);
   }
 
-  if (isScrubbing) {
+  if (isScrubbing && scrubMoved) {
     const cur = getCurrentEvent();
     const label = cur ? `◀  ${cur.m}마디 (${cur.sec}) · ${cur.chord}  ▶` : '◀  타임라인 이동 중  ▶';
     ctx.save();
@@ -952,12 +952,13 @@ document.getElementById('seekBar').oninput = (e) => {
   updateHUD();
 };
 
-// Stage Horizontal Slide-to-Scrub Timeline (touch + mouse + trackpad)
+// Stage Horizontal Slide-to-Scrub Timeline + Tap-to-Toggle Play/Pause
 let isScrubbing = false;
 let scrubStartX = 0;
+let scrubStartY = 0;
 let scrubStartBeat = 0;
 let scrubWasPlaying = false;
-let scrubLabelTimer = null;
+let scrubMoved = false;
 
 canvas.style.touchAction = 'none';
 canvas.style.cursor = 'grab';
@@ -965,7 +966,9 @@ canvas.style.cursor = 'grab';
 canvas.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 && e.pointerType === 'mouse') return;
   isScrubbing = true;
+  scrubMoved = false;
   scrubStartX = e.clientX;
+  scrubStartY = e.clientY;
   scrubStartBeat = currentBeat;
   scrubWasPlaying = isPlaying;
   if (isPlaying) {
@@ -979,6 +982,9 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   if (!isScrubbing) return;
   const dx = e.clientX - scrubStartX;
+  const dy = e.clientY - scrubStartY;
+  if (!scrubMoved && Math.abs(dx) <= 6 && Math.abs(dy) <= 6) return;
+  scrubMoved = true;
   const pxPerBeat = Math.max(28, Math.min(56, stageWrap.clientWidth / 8));
   const nextBeat = Math.max(0, Math.min(TOTAL_BEATS - 0.01, scrubStartBeat + dx / pxPerBeat));
   currentBeat = nextBeat;
@@ -988,18 +994,23 @@ canvas.addEventListener('pointermove', (e) => {
   updateHUD();
 });
 
-function endScrub(e) {
+function endScrub(e, isCancel = false) {
   if (!isScrubbing) return;
   isScrubbing = false;
   canvas.style.cursor = 'grab';
   try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
-  if (scrubWasPlaying) {
+  if (!isCancel && !scrubMoved) {
+    ensureAudio();
+    isPlaying = !scrubWasPlaying;
+    if (isPlaying) document.getElementById('waitBanner').style.display = 'none';
+    updatePlayBtn();
+  } else if (scrubWasPlaying) {
     isPlaying = true;
     updatePlayBtn();
   }
 }
-canvas.addEventListener('pointerup', endScrub);
-canvas.addEventListener('pointercancel', endScrub);
+canvas.addEventListener('pointerup', (e) => endScrub(e, false));
+canvas.addEventListener('pointercancel', (e) => endScrub(e, true));
 
 canvas.addEventListener('wheel', (e) => {
   if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && Math.abs(e.deltaX) > 1) {
