@@ -74,6 +74,9 @@
     background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
   }
   .sec-pill.on { background: rgba(56, 189, 248, 0.18); border-color: var(--lh); color: #fff; }
+  .sec-divider { width: 1px; height: 16px; background: var(--border); flex-shrink: 0; margin: 0 2px; }
+  .sec-pill.short-toggle { border-color: #64748b; color: #cbd5e1; font-weight: 600; }
+  .sec-pill.short-toggle.on { background: rgba(251, 191, 36, 0.2); border-color: var(--warn); color: #fde68a; }
 
   /* HUD / Lyrics Banner */
   .hud {
@@ -256,12 +259,29 @@ const BASE_BPM = 70;
 const SEC_PER_BEAT = 60 / BASE_BPM;
 
 let easyMode = true;
+let shortMode = false;
 let TIMELINE = [];
 let SECTION_RANGES = {};
 let TOTAL_BEATS = 0;
 
-function loadSongVersion(useEasy) {
-  const src = useEasy ? EASY_EVENTS : ORIG_EVENTS;
+function makeShortEvents(src) {
+  const out = [];
+  for (const ev of src) {
+    if (ev.sec === '2절' || ev.sec === '2후렴') continue;
+    if (ev.sec === '1후렴' && ev.m === 29) continue;
+    if (ev.sec === '브릿지' && ev.m === 38) continue;
+    if (ev.sec === '1후렴' && ev.m === 28 && ev.lyric === '난 웃어요') {
+      out.push({ ...ev, tip: '바로 브릿지(몇 번이고 내게)로!' });
+    } else {
+      out.push(ev);
+    }
+  }
+  return out;
+}
+
+function loadSongVersion(useEasy, useShort = shortMode) {
+  const base = useEasy ? EASY_EVENTS : ORIG_EVENTS;
+  const src = useShort ? makeShortEvents(base) : base;
   let beatCursor = 2;
   TIMELINE = [];
   SECTION_RANGES = {};
@@ -279,7 +299,7 @@ function loadSongVersion(useEasy) {
   });
   TOTAL_BEATS = beatCursor + 2;
 }
-loadSongVersion(easyMode);
+loadSongVersion(easyMode, shortMode);
 
 // Solfege & Note names (Eb Major friendly: flat names)
 const SOLFEGE_KO = ['도', '레♭', '레', '미♭', '미', '파', '파#', '솔', '라♭', '라', '시♭', '시'];
@@ -514,20 +534,47 @@ if (navigator.requestMIDIAccess) {
 
 // Sections Bar
 const sectionsBar = document.getElementById('sectionsBar');
-Object.values(SECTION_RANGES).forEach(sec => {
-  const btn = document.createElement('button');
-  btn.className = 'sec-pill' + (sec.name === activeSection ? ' on' : '');
-  btn.textContent = sec.name;
-  btn.onclick = () => {
-    activeSection = sec.name;
-    currentBeat = sec.startBeat;
+function renderSectionsBar() {
+  sectionsBar.innerHTML = '';
+  Object.values(SECTION_RANGES).forEach(sec => {
+    const btn = document.createElement('button');
+    btn.className = 'sec-pill' + (sec.name === activeSection ? ' on' : '');
+    btn.textContent = sec.name;
+    btn.onclick = () => {
+      activeSection = sec.name;
+      currentBeat = sec.startBeat;
+      playedEvents.clear();
+      waitedIdx = -1;
+      document.querySelectorAll('.sec-pill:not(.short-toggle)').forEach(p => p.classList.toggle('on', p.textContent === sec.name));
+      updateHUD();
+    };
+    sectionsBar.appendChild(btn);
+  });
+
+  const divider = document.createElement('span');
+  divider.className = 'sec-divider';
+  sectionsBar.appendChild(divider);
+
+  const shortBtn = document.createElement('button');
+  shortBtn.id = 'btnShort';
+  shortBtn.className = 'sec-pill short-toggle' + (shortMode ? ' on' : '');
+  shortBtn.textContent = shortMode ? '✂️ 축약 버전 ON (1후렴→브릿지)' : '✂️ 축약 버전 (1후렴→브릿지)';
+  shortBtn.title = '1후렴 "난 웃어요"에서 2절·2후렴을 건너뛰고 브릿지 "몇 번이고 내게"로 바로 연결합니다';
+  shortBtn.onclick = () => {
+    const ratio = TOTAL_BEATS > 0 ? currentBeat / TOTAL_BEATS : 0;
+    shortMode = !shortMode;
+    loadSongVersion(easyMode, shortMode);
+    if (!SECTION_RANGES[activeSection]) activeSection = '1후렴';
+    currentBeat = Math.max(0, Math.min(TOTAL_BEATS - 0.01, ratio * TOTAL_BEATS));
     playedEvents.clear();
     waitedIdx = -1;
-    document.querySelectorAll('.sec-pill').forEach(p => p.classList.toggle('on', p.textContent === sec.name));
+    document.getElementById('waitBanner').style.display = 'none';
+    renderSectionsBar();
     updateHUD();
   };
-  sectionsBar.appendChild(btn);
-});
+  sectionsBar.appendChild(shortBtn);
+}
+renderSectionsBar();
 
 function getCurrentEvent() {
   return TIMELINE.find(ev => currentBeat >= ev.startBeat && currentBeat < ev.endBeat) || null;
@@ -1001,11 +1048,12 @@ document.getElementById('btnEasy').onclick = (e) => {
   easyMode = !easyMode;
   e.target.textContent = easyMode ? '🌱 쉬운 악보' : '🎼 원곡 악보';
   e.target.classList.toggle('active', easyMode);
-  loadSongVersion(easyMode);
+  loadSongVersion(easyMode, shortMode);
   currentBeat = Math.max(0, Math.min(TOTAL_BEATS - 0.01, ratio * TOTAL_BEATS));
   playedEvents.clear();
   waitedIdx = -1;
   document.getElementById('waitBanner').style.display = 'none';
+  renderSectionsBar();
   updateHUD();
 };
 document.getElementById('btnVocal').onclick = (e) => {
